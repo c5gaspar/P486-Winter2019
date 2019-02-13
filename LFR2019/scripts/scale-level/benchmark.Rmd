@@ -1,0 +1,16 @@
+```{r setup}
+source("utils/dataSplitting.R")
+
+c(trainDat, testDat, trainLabels, testLabels, valDat, valLabels, colNames) %<-% dataGen(nom = F, val = T, mat = F)
+colnames(trainDat) <- colNames
+colnames(testDat) <- colNames
+trainDat$CRTtotal <- trainLabels
+testDat$CRTtotal <- testLabels
+```
+
+```{r}
+lm(CRTtotal ~ NPI + HSNS + BISm + BRLNscore + WORDSUM, data = trainDat) %>%
+  predict(testDat) %>%
+  Metrics::mae(actual = testDat$CRTtotal, predicted = .)
+```
+

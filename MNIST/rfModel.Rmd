@@ -1,0 +1,60 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## MNIST Random Forests Model Generation
+# Last updated (executed): `r format(Sys.Date(), "%a %b %d, %Y")`
+
+```{r setup}
+# Load packages
+library(tidyverse); library(magrittr); library(readmnist);
+# ML training specific packages
+library(caret); library(e1071); library(randomForest); library(foreach); 
+library(import); library(RcppEigen); library(ranger)
+# Set random seed (maybe important given stochastic gradient descent?)
+set.seed(958735798)
+```
+
+```{r input-and-manipulate-data}
+# Data in this format was received from Kaggle MNIST kernel
+# https://www.kaggle.com/c/digit-recognizer
+
+##################
+### INPUT DATA ###
+##################
+# Load training data
+trainDat <- read.csv("train.csv")
+
+# Load testing data
+testDat <- read.csv("test.csv")
+
+#######################
+### MANIPULATE DATA ###
+#######################
+# Strip classification from training data
+trainLabel <- trainDat$label
+trainDat %<>% .[,-c(1)]  # Actually strip
+# Reduce values between 0 and 1 (better for algorithim)
+trainDat <- trainDat/255
+testDat <- testDat/255
+
+```
+
+
+```{r model-construction}
+# Establish training parameters (2 folds repeated 2 times)
+modelTrainControl <- trainControl(method = "repeatedcv", 
+                                  number = 2, repeats = 2, verboseIter = TRUE)
+duration <- c('start' = Sys.time())
+
+rfModel <- train(x = trainDat*255,  
+                 y = trainLabel, 
+                 method = "ranger", 
+                 trControl = modelTrainControl,
+                 verbose = TRUE)
+
+duration[2] <- c('end' = Sys.time())
+
+cat('>> ', duration[2]-duration[1])  # Took about 2.5hrs, more appropriately should have used 3 folds, not 2.
+```

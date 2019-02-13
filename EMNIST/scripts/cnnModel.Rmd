@@ -1,0 +1,159 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r start}
+library(dplyr); library(magrittr); library(keras); library(caret)
+source("utils/processTrainData.R")
+source("utils/modelFuns.R")
+source("utils/testModel.R")
+
+set.seed(879123)
+
+```
+
+```{r reshape}
+trainDat %<>% array_reshape(c(dim(.)[1], 28, 28, 1))
+valDat %<>% array_reshape(c(dim(.)[1], 28, 28, 1))
+```
+
+
+```{r model, fig.height = 10, fig.width = 10, dpi = 1200}
+cnnModel1 <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3,3), activation = "relu", 
+                input_shape = c(28, 28, 1)) %>%
+  layer_batch_normalization() %>%  # Better than regularization for convnets
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu") %>% 
+  layer_global_average_pooling_2d() %>%  # Better than dense layers for convnets
+  layer_dense(units = 47, activation = "softmax")
+
+cnnModel1 %>% compileModel()
+
+cnnModelFit1 <- fitModel(cnnModel1,
+                         bs = 2300,  # Same percentage of data (relative to entire set) used in MNIST training
+                         ep = 85,
+                         v = 1)
+
+cnnModel1 <- testModel(cnnModel1, kerasModel = T, convnet = T)
+
+results <- c(results, "85 Epoch, GAP, 1 Norm (top)" = cnnModel1)
+```
+
+```{r data-augmented-fit}
+fitMetrics <- list()
+bsSeq <- seq(500, 5000, 500)
+for(size in 1:length(bsSeq)){
+  tictoc::tic()
+cnnModel <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3,3), activation = "relu", 
+                input_shape = c(28, 28, 1)) %>%
+  layer_batch_normalization() %>%  # Better than regularization for convnets
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu") %>% 
+  layer_global_average_pooling_2d() %>%  # Better than dense layers for convnets
+  layer_dense(units = 47, activation = "softmax")
+
+cnnModel %>% compileModel()
+
+# Establish image augmentation parameters
+dataGen <- image_data_generator(rescale = NULL,
+                                rotation_range = 20,  # Allow for up 15 degree rotation
+                                horizontal_flip = FALSE)  # Allow for mirroring
+
+batchSize <- bsSeq[size]
+
+# Parses array through above image generation function
+trainImgGen <- flow_images_from_data(x = trainDat,
+                                     y = trainLabels,
+                                     batch_size = batchSize,  # Establishing training batch size here
+                                     generator = dataGen)
+
+augModelFit <- cnnModel %>% 
+  fit_generator(generator = trainImgGen,
+                steps_per_epoch = ceiling(dim(trainDat)[1]/batchSize),  # How many batches to run epoch 
+                epochs = 125,
+                validation_data = list(valDat, valLabels))
+
+fitMetrics[[size]] <- dplyr::mutate(plot(augModelFit)$data, "batch_size" = bsSeq[size])
+
+tictoc::toc()
+}
+```
+
+```{r batch-size-analysis, fig.width = 10, fig.height = 10, dpi = 1200}
+batchData <- plyr::rbind.fill(fitMetrics)
+lossData <- batchData %>%
+  filter(data %in% "validation" & metric %in% "loss") %>%
+  arrange(value)
+
+batchData %>%
+  filter(data %in% "validation" & metric %in% "loss") %>%
+  filter(epoch %in% seq(45, 125, 10)) %>%
+  mutate("metric_type" = paste(data, metric),
+         "epoch" = paste("Epoch =", epoch)) %>%
+  mutate("epoch" = factor(epoch, levels = levels(factor(epoch))[c(4:9, 1:3)])) %>%
+  ggplot(aes(x = batch_size, y = value, colour = metric_type, group = metric_type))+
+  geom_point(alpha = .5)+
+  coord_trans(y = "log10", limy = c(.3, .95))+
+  facet_wrap(~epoch)+
+  stat_smooth(method = "loess", se = F)
+```
+
+```{r final-model, fig.height = 10, fig.width = 10, dpi = 1200}
+  tictoc::tic()
+cnnModel <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3,3), activation = "relu", 
+                input_shape = c(28, 28, 1)) %>%
+  layer_batch_normalization() %>%  # Better than regularization for convnets
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu") %>% 
+  layer_global_average_pooling_2d() %>%  # Better than dense layers for convnets
+  layer_dense(units = 47, activation = "softmax")
+
+cnnModel %>% compileModel()
+
+# Establish image augmentation parameters
+dataGen <- image_data_generator(rescale = NULL,
+                                rotation_range = 20,  # Allow for up 15 degree rotation
+                                horizontal_flip = FALSE)  # Allow for mirroring
+
+batchSize <- 1500
+
+# Parses array through above image generation function
+trainImgGen <- flow_images_from_data(x = trainDat,
+                                     y = trainLabels,
+                                     batch_size = batchSize,  # Establishing training batch size here
+                                     generator = dataGen)
+
+augModelFit <- cnnModel %>% 
+  fit_generator(generator = trainImgGen,
+                steps_per_epoch = ceiling(dim(trainDat)[1]/batchSize),  # How many batches to run epoch 
+                epochs = 120,
+                validation_data = list(valDat, valLabels))
+
+tictoc::toc
+
+plot(augModelFit)
+
+```
+
+```{r follow-up}
+mappings <- read.csv("../data/balanced/emnist-balanced-mapping.csv", header = F)
+testDat <- testModel(cnnModel, ke = T, convnet = T, re = T)
+testLabels <- factor(testDat[2][[1]])
+testDat <- testDat[1][[1]]
+predictions <- factor(predict_classes(cnnModel, testDat))
+
+confusionMatrix(data = predictions, 
+                      reference = testLabels)
+
+testModel(cnnModel, keras = T, convnet = T)
+```

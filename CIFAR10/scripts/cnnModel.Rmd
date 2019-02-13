@@ -1,0 +1,134 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup}
+set.seed(1089102983)
+library(keras); library(magrittr); library(dplyr)
+source("utils/modelFuns.R")
+```
+
+```{r load-data}
+source("utils/processData.R")
+```
+
+```{r first-model, fig.height = 8, fig.width = 12, dpi = 1200}
+
+# Set as 3072 filters for first layer? No way too much memory used.
+firstModel <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 128, input_shape = c(32, 32, 3), kernel_size = c(3,3),
+                activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 256, kernel_size = c(3,3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 256, kernel_size = c(3,3), activation = "relu") %>%
+  layer_global_average_pooling_2d() %>%
+  layer_dense(units = 10, activation = "softmax")
+
+firstModel %>% compileModel()
+
+# Add image augmentation
+dataGen <- image_data_generator(rescale = NULL,
+                                rotation_range = 15,  # Allows for a 5 degree (L/R) rotation
+                                #zoom_range = .1,  # Allows for zoom
+                                #horizontal_flip = TRUE, # Allow for mirroring
+                                vertical_flip = FALSE#,  # But not inversion
+                                #width_shift_range = .2,  # Allow stretching of x
+                                #height_shift_range = .2 # Allow stretching of x
+)
+
+modelTrain <- fitModel(firstModel, bs = 1024, ep = 50, v = 1)
+# Variable input                                
+batchSize <- 1024
+
+trainImgGen <- flow_images_from_data(x = trainDat,
+                      y = trainLabels,
+                      batch_size = batchSize,  # Establishing training batch size here
+                      generator = dataGen)
+
+
+
+firstModelTrain <- firstModel %>% 
+  fit_generator(generator = trainImgGen,
+                # Decimal shows how much data is 'created'
+                steps_per_epoch = ceiling((dim(trainDat)[1]/batchSize) * 1.25),
+                epochs = 50,
+                validation_data = list(valDat, valLabels))
+
+plot(firstModelTrain)
+
+
+```
+
+
+```{r imported-model}
+baseFilter <- 32
+importModel <- keras_model_sequential() %>%
+  #
+  layer_conv_2d(filter = baseFilter, kernel_size = c(3,3), input_shape = c(32,32,3), 
+                kernel_regularizer = regularizer_l2(1e-4), activation = "relu",
+                padding = "same") %>%
+  layer_batch_normalization() %>%
+  #
+  layer_conv_2d(filter = baseFilter, kernel_size = c(3,3),  
+                kernel_regularizer = regularizer_l2(1e-4), 
+                activation = "relu", padding = "same") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_dropout(rate = .2) %>%
+  #
+  layer_conv_2d(filter = baseFilter*2, kernel_size = c(3,3),  
+                kernel_regularizer = regularizer_l2(1e-4), 
+                activation = "relu", padding = "same") %>%
+  layer_batch_normalization() %>%
+  #
+  layer_conv_2d(filter = baseFilter*2, kernel_size = c(3,3),  
+                kernel_regularizer = regularizer_l2(1e-4), 
+                activation = "relu", padding = "same") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_dropout(rate = .3) %>%
+  #
+  layer_conv_2d(filter = baseFilter*4, kernel_size = c(3,3),  
+                kernel_regularizer = regularizer_l2(1e-4), 
+                activation = "relu", padding = "same") %>%
+  layer_batch_normalization() %>%
+  #
+  layer_conv_2d(filter = baseFilter*4, kernel_size = c(3,3),  
+                kernel_regularizer = regularizer_l2(1e-4), 
+                activation = "relu", padding = "same") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_dropout(rate = .4) %>%
+  layer_global_average_pooling_2d() %>%
+  layer_dense(units = 10, activation = "softmax")
+
+importModel %>% compileModel()
+
+dataGen <- image_data_generator(rescale = NULL,
+                                rotation_range = 25,  # Allows for a 5 degree (L/R) rotation
+                                #zoom_range = .1,  # Allows for zoom
+                                horizontal_flip = TRUE, # Allow for mirroring
+                                vertical_flip = FALSE#,  # But not inversion
+                                #width_shift_range = .1,  # Allow stretching of x
+                                #height_shift_range = .1 # Allow stretching of x
+)
+
+batchSize <- 256
+
+trainImgGen <- flow_images_from_data(x = trainDat,
+                      y = trainLabels,
+                      batch_size = batchSize,  # Establishing training batch size here
+                      generator = dataGen)
+
+
+firstModelTrain <- importModel %>% 
+  fit_generator(generator = trainImgGen,
+                # Decimal shows how much data is 'created'
+                steps_per_epoch = ceiling((dim(trainDat)[1]/batchSize) * 2),
+                epochs = 200,
+                validation_data = list(valDat, valLabels))
+
+```

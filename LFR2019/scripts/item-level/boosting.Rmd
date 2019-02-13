@@ -1,0 +1,47 @@
+```{r setup}
+library(caret); library(tidyverse); library(e1071); library(randomForest); 
+library(foreach); library(RcppEigen); library(ranger)
+
+set.seed(Sys.time())
+```
+
+```{r load-data}
+source("dataClean.R") %>% invisible()
+
+# Generate random indices for testing data
+tIndices <- caret::createDataPartition(y = dat$CRTtotal,
+                           p = .75) %>% # Percent of data to keep for training
+  unlist()
+
+# Partition testing and training data
+trainDat <- dat[tIndices,]
+testDat <- dat[-tIndices,]
+
+# Strip outcome from data
+trainOut <- trainDat$CRTtotal
+testOut <- testDat$CRTtotal
+
+trainDat %<>% dplyr::select(-matches("CRTtotal"))
+testDat %<>% dplyr::select(-matches("CRTtotal"))
+```
+
+```{r}
+trC <- caret::trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 10,
+                           verboseIter = TRUE)
+
+treeBagModel <- caret::train(x = trainDat,
+                             y = factor(trainOut), 
+                             method = "treebag",
+                             trControl = trC,
+                             preProcess = c("scale", "center", "medianImpute"),
+                             verbose = T)
+
+```
+
+```{r}
+predict(treeBagModel, testDat) %>%
+  confusionMatrix(ref = factor(testOut))
+```
+

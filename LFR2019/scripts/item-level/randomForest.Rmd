@@ -1,0 +1,51 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup}
+library(caret); library(tidyverse); library(e1071); library(randomForest); 
+library(foreach); library(RcppEigen); library(ranger)
+
+# Set random seed
+set.seed(981239081)
+```
+
+```{r load-cleaned-data}
+source("dataClean.R")
+
+# Generate random indices for testing data
+tIndices <- caret::createDataPartition(y = dat$CRTtotal,
+                           p = .75) %>% # Percent of data to keep for training
+  unlist()
+
+# Partition testing and training data
+trainDat <- dat[tIndices,]
+testDat <- dat[-tIndices,]
+
+# Strip outcome from data
+trainOut <- trainDat$CRTtotal
+testOut <- testDat$CRTtotal
+
+trainDat %<>% select(-matches("CRTtotal"))
+testDat %<>% select(-matches("CRTtotal"))
+```
+
+```{r run-rf}
+rfModel <- caret::train(x = trainDat,
+                        y = factor(trainOut),
+                        method = "adaboost", 
+                        trControl = caret::trainControl(method = "cv", 
+                                                        number = 15,
+                                                        verboseIter = TRUE), 
+                        preProcess = c("scale", "center", "medianImpute"),
+                        verbose = TRUE) 
+```
+
+```{r test-rf}
+predict(rfModel, testDat) %>%
+  confusionMatrix(ref = factor(testOut))
+```
+
+
+

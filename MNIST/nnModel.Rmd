@@ -1,0 +1,457 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## MNIST Neural Network Model Generation
+# Last updated (executed): `r format(Sys.Date(), "%a %b %d, %Y")`
+
+```{r setup}
+# Load packages
+library(knitr)
+library(tidyverse); library(magrittr); library(keras); library(ggplot2)
+
+knitr::opts_chunk$set(cache = TRUE)
+# Set random seed (maybe important given stochastic gradient descent?)
+set.seed(958735798)
+```
+
+```{r input-and-manipulate-data}
+# Data in this format was received from Kaggle MNIST kernel
+# https://www.kaggle.com/c/digit-recognizer
+
+##################
+### INPUT DATA ###
+##################
+# Load training data
+trainDatRaw <- read.csv("train.csv") %>%
+  data.matrix()  # This makes reshaping/processing the data a lot easier
+
+# Load testing data
+testDatRaw <- read.csv("test.csv") %>%
+  data.matrix()  # This makes reshaping/processing the data a lot easier
+
+#######################
+### MANIPULATE DATA ###
+#######################
+# Store training labels
+trainLabels <- trainDatRaw[,1] %>%
+  to_categorical()  # Creating vector of integers denoting which label is present
+# Strip labels from training data
+trainDat <- trainDatRaw %>% 
+  .[,-1] %>%
+  # Bring values between 0 and 1 (alternatively can divide by 255)
+  normalize()
+
+# Grab some validation data
+valInd <- sample(1:dim(trainDat)[1], 5000)  # Generate random indices
+valDat <- trainDat[valInd,]  # Create validation data through indices
+valLabels <- trainLabels[valInd,]  # Create validation labels
+trainDat %<>% .[-valInd,]  # Remove features from training data
+trainLabels %<>% .[-valInd,]  # Remove labels from training labels
+
+# Normalize test data
+testDat <- normalize(testDatRaw)
+
+
+### Setup compile function ###
+compileModel <- function(x) {
+  compile(object = x,
+          # Sets the parameters for gradient descent
+          optimizer = "rmsprop",
+          # Compares the observed prob. distribution to the predicted prob. distribution of labels
+          loss = "categorical_crossentropy",
+          # Indicates the metric of interest in training (what to minimize)
+          metrics = c("accuracy"))
+}
+
+### Setup fit function ###
+fitModel <- function(x) {
+  fit(object = x,  # Feeding the model structure
+      x = trainDat,  # Training data (features)
+      y = trainLabels,   # Training labels (targets)
+      batch_size = 256,  # Sample size (# of images) for each descent 
+      epochs = 20,   # Total number of full samples to use in training
+      validation_data = list(valDat, valLabels),  # Validation data
+      verbose = 1)  # Silent
+}
+
+
+```
+
+```{r dense-model-construction}
+
+# Test different node sizes on first layer
+denseNodeIter.1 <- (function() {
+  fitNodeMetrics <- list()
+  nodes <- seq(64, 1024, 64)
+  for(node in 1:length(nodes)) {
+    cat("-----\nFitting node size of ", nodes[node], "...\n-----\n", sep = "")
+    
+    model <- keras_model_sequential() %>%
+      layer_dense(units = nodes[i], activation = "relu", input_shape = c(784)) %>%
+      layer_dense(units = 10, activation = "softmax") %>%
+      # Compile using pre-defined parameters
+      compileModel
+    
+    modelFit <- fitModel(model)
+    fitNodeMetrics[[node]] <- mutate(plot(modelFit)$data, "node_size" = nodes[node])
+    print(modelFit)
+  }
+  return(fitNodeMetrics) 
+})()
+
+# Plot results
+denseNodeIter.1C <- plyr::rbind.fill(denseNodeIter.1)
+
+filter(denseNodeIter.1C, metric %in% 'loss') %>%
+  ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  coord_cartesian(ylim = c(0, 1))+
+  geom_point()+
+  geom_smooth(se = F)+
+  labs(title = "Model Loss by Hidden Layer Neurons")+
+  facet_wrap(~node_size)
+
+filter(denseNodeIter.1C, metric %in% 'acc') %>%
+  ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  coord_cartesian(ylim = c(.75, 1))+
+  geom_point()+
+  geom_smooth(se = F)+
+  labs(title = "Model Accuracy by Hidden Layer Neurons")+
+  facet_wrap(~node_size)
+
+# Min val loss by neuron size
+filter(denseNodeIter.1C, 
+       data %in% 'validation', 
+       metric %in% 'loss', 
+       epoch %in% 20) %>%
+  arrange(value) %>%
+  .[1,]
+
+filter(denseNodeIter.1C,
+       data %in% 'training',
+       metric %in% 'acc',
+       epoch %in% 20) %>%
+  arrange(desc(value)) %>%
+  .[1,]
+
+# Testing 2-layer setups
+denseNodeIter.2 <- (function() {
+  fitNodeMetrics <- list()
+  nodes <- seq(64, 512, 64)
+  for(node in 1:length(nodes)) {
+    cat("-----\nFitting node size of ", nodes[node], "...\n-----\n", sep = "")
+    
+    model <- keras_model_sequential() %>%
+  layer_dense(units = 576, activation = "relu", input_shape = c(784)) %>%
+  layer_dense(units = nodes[node], activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax") %>%
+  # Compile using pre-defined parameters
+  compileModel()
+    
+    modelFit <- fitModel(model)
+    fitNodeMetrics[[node]] <- mutate(plot(modelFit)$data, "node_size" = nodes[node])
+    print(modelFit)
+  }
+  return(fitNodeMetrics) 
+})()
+
+# Plot results
+denseNodeIter.2C <- plyr::rbind.fill(denseNodeIter.2)
+
+filter(denseNodeIter.2C, metric %in% 'loss') %>%
+  ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  coord_cartesian(ylim = c(0, .4))+
+  geom_point()+
+  geom_smooth(se = F)+
+  labs(title = "Model Loss by 2ND Hidden Layer Neurons")+
+  facet_wrap(~node_size)
+
+filter(denseNodeIter.2C, metric %in% 'acc') %>%
+  ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  coord_cartesian(ylim = c(.9, 1))+
+  geom_point()+
+  geom_smooth(se = F)+
+  labs(title = "Model Accuracy by 2ND Hidden Layer Neurons")+
+  facet_wrap(~node_size)
+
+
+
+# Resulting 2 layer design
+denseModel_576.64 <- keras_model_sequential() %>%
+  layer_dense(units = 576, activation = "relu", input_shape = c(784)) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax") %>%
+  # Compile using pre-defined parameters
+  compileModel()
+
+denseFit_576.64 <- fit(denseModel_576.64, 
+                       x = trainDat,  
+                       y = trainLabels,  
+                       batch_size = 256,  
+                       epochs = 20,   
+                       validation_data = list(valDat, valLabels), 
+                       verbose = 1)
+
+# Testing 3-layer setups
+denseNodeIter.3 <- (function() {
+  fitNodeMetrics <- list()
+  nodes <- seq(12, 64, 8)
+  for(node in 1:length(nodes)) {
+    cat("-----\nFitting node size of ", nodes[node], "...\n-----\n", sep = "")
+    
+    model <- keras_model_sequential() %>%
+      layer_dense(units = 576, activation = "relu", input_shape = c(784)) %>%
+      layer_dense(units = 64, activation = "relu") %>%
+      layer_dense(units = nodes[node], activation = "relu") %>%
+      layer_dense(units = 10, activation = "softmax") %>%
+      # Compile using pre-defined parameters
+      compileModel()
+    
+    modelFit <- fitModel(model)
+    fitNodeMetrics[[node]] <- mutate(plot(modelFit)$data, "node_size" = nodes[node])
+    print(modelFit)
+  }
+  return(fitNodeMetrics) 
+})()
+
+# Plot results
+denseNodeIter.3C <- plyr::rbind.fill(denseNodeIter.3)
+
+filter(denseNodeIter.3C, metric %in% 'loss') %>%
+  ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  coord_cartesian(ylim = c(0, .5), xlim = c(5, 20))+
+  geom_point()+
+  geom_smooth(se = F)+
+  labs(title = "Model Loss by 3ND Hidden Layer Neurons")+
+  facet_wrap(~node_size)
+
+filter(denseNodeIter.3C, metric %in% 'acc') %>%
+  ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  coord_cartesian(ylim = c(.8, 1), xlim = c(5, 20))+
+  geom_point()+
+  geom_smooth(se = F)+
+  labs(title = "Model Accuracy by 3ND Hidden Layer Neurons")+
+  facet_wrap(~node_size)
+
+# Min val loss by neuron size
+filter(denseNodeIter.3C, 
+       data %in% 'validation', 
+       metric %in% 'loss', 
+       epoch %in% 20) %>%
+  arrange(value)
+
+filter(denseNodeIter.3C,
+       data %in% 'training',
+       metric %in% 'acc',
+       epoch %in% 20) %>%
+  arrange(desc(value))
+
+
+denseModel_576.64.20 <- keras_model_sequential() %>%
+      layer_dense(units = 576, activation = "relu", input_shape = c(784)) %>%
+      layer_dense(units = 64, activation = "relu") %>%
+      layer_dense(units = 20, activation = "relu") %>%
+      layer_dense(units = 10, activation = "softmax") %>%
+  compileModel()
+
+denseFit_576.64.20 <- fit(denseModel_576.64.20,
+                          x = trainDat,  # Training data (features)
+                          y = trainLabels,   # Training labels (targets)
+                          batch_size = 256,  # Sample size (# of images) for each descent 
+                          epochs = 20,   # Total number of full samples to use in training
+                          validation_data = list(valDat, valLabels),  # Validation data
+                          verbose = 1)
+
+# Plot classification errors on validation set
+predictCompare <- data.frame("trueLabel" = trainDatRaw[valInd,1],
+           "predictLabel" = predict_classes(denseModel_576.64.20, valDat)) %>%
+  mutate("classAcc" = (trueLabel == predictLabel) %>% as.numeric)
+  
+# Mean accuracy
+predictCompare %>% 
+  group_by(trueLabel) %>%
+  summarise("mean" = mean(classAcc)) %>%
+  ggplot(aes(x = trueLabel, y = mean, fill = factor(trueLabel)))+
+  coord_cartesian(ylim = c(.955, 1))+
+  geom_bar(stat = "identity", show.legend = F)+
+  scale_x_continuous(breaks = 0:9)+
+  scale_y_continuous("Mean Acc", breaks = seq(.95, 1, .005), 
+                     labels = scales::percent, expand = c(0,0))+
+  ggthemes::scale_fill_stata()
+
+# False predictions
+predictCompare %>%
+  group_by(trueLabel, predictLabel) %>%
+  summarise("count" = n()) %>%
+  ungroup() %>%
+  group_by(trueLabel) %>%
+  mutate("total" = sum(count),
+         "percent" = count/total) %>%
+  ungroup() %>%
+  filter(trueLabel != predictLabel) %>%
+  mutate("trueLabel" = paste0("True Label = ", trueLabel)) %>%
+  ggplot(aes(predictLabel, percent, fill = factor(predictLabel)))+
+  coord_cartesian(xlim = c(0,9))+
+  geom_bar(stat = "identity", show.legend = F)+
+  geom_text(aes(x = predictLabel, y = ifelse(count != 1, .0025, .004), label = paste0("n = ", count)), size = 3)+
+  scale_x_continuous("False Labels", breaks = 0:9)+
+  scale_y_continuous("Percent of FALSE Categorizations", breaks = seq(0, .015, .005),
+                     labels = scales::percent)+
+  labs(title = "False Label Predictions as a function of True Labels (3 hidden layer dNN w/ 576, 64, 20 and 10 nodes)")+
+  ggthemes::scale_fill_stata()+
+  facet_wrap(~trueLabel, ncol = 2)
+
+# All false predictions
+with(filter(predictCompare, trueLabel != predictLabel),
+  table(trueLabel, predictLabel)) %>%
+  chisq.test()
+
+# Rounded digit false predictions
+with(filter(predictCompare, trueLabel != predictLabel, trueLabel %in% c(3,5,6,8,9)),
+  table(trueLabel, predictLabel)) %>%
+  chisq.test()
+
+
+
+
+  # Generate predictions
+data.frame("ImageId" = 1:28000,
+           "Label" = predict_classes(denseModel_576.64.20, testDat)) %>%
+  write.csv("prediction-files/nnPredictions_576-64-20.csv", row.names = F)
+
+
+
+
+```
+
+
+
+```{r batch-size-iterative-dense-model-construction, eval = F}
+# Iteratively train models with different batch sizes
+# Need to define the model within the function as it redefines the model implicitly
+denseIter <- (function() {
+  fitMetrics <- list()
+  batches <- seq(64, 1024, 64)
+  for(i in 1:length(batches)) {
+    cat("-----\nFitting batch size of ", batches[i], "...\n-----\n", sep = "")
+    # Define model inside of loop so as to reinitalize it each time
+    # I've noticed that the structure (with the training) tends to be passed 
+    # forward in each iteration it needs to be refreshed each time
+    model <- keras_model_sequential() %>%
+      layer_dense(units = 512, activation = "relu", input_shape = c(784)) %>%
+      layer_dense(units = 10, activation = "softmax") %>%
+      # Compile using pre-defined parameters
+      compileModel()
+    # Define the fit object for this specific iteration
+    iterFit <- fit(object = model,
+                   x = trainDat,  
+                   y = trainLabels,   
+                   batch_size = batches[i],  
+                   epochs = 50,  # Increased epochs for exploring
+                   validation_data = list(valDat, valLabels),  # STATIC val. data
+                   verbose = 1
+    )
+    # Store fit metrics in list
+    fitMetrics[[i]] <- plot(iterFit)$data
+  }
+ return(fitMetrics) 
+}
+)()  # These extra braces executes the function immediately (no need to recall)
+```
+
+```{r batch-analysis, fig.width = 10, fig.height= 10}
+# Add batch size identifier
+for(li in 1:length(denseIter)) {
+  denseIter[[li]] %<>% mutate("batch_size" = seq(64, 1024, 64)[li])
+}
+
+# Combine data into one data.frame
+trainCombined <- plyr::rbind.fill(denseIter)
+
+
+### Plot ###
+
+# Model loss as a function of batch size & epoch
+trainCombined %>%
+  filter(metric %in% 'loss') %>%
+ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  coord_cartesian(ylim = c(0, .8))+
+  geom_smooth(se = F)+
+  geom_point(size = .75)+
+  labs(title = "Model Loss")+
+  scale_y_continuous("Model Loss", breaks = seq(0, 1, .2))+
+  facet_wrap(~batch_size, ncol = 2)
+  
+# Model accuracy
+trainCombined %>%
+  filter(metric %in% 'acc') %>%
+  ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  coord_cartesian(ylim = c(.8, 1))+
+  geom_smooth(se = F)+
+  geom_point(size = .05)+
+  scale_y_continuous("Prediction Accuracy", breaks = seq(.8, 1, .05))+
+  labs(title = "Model Accuracy")+
+  facet_wrap(~batch_size, ncol = 2)
+  
+
+
+minValLoss <- data.frame()
+for(li in 1:length(denseIter)) {
+  # Determine minimum validation loss for batch
+  filter(denseIter[[li]], 
+         data %in% "validation", 
+         metric %in% "loss") %>%
+    .[,'value'] %>%
+    which.min()
+}
+
+```
+
+
+```{r dense-model-construction-2hlayer}
+denseModel2 <- keras_model_sequential() %>%  
+  layer_dense(units = 512, activation = "relu", input_shape = c(784)) %>%
+  # New hidden layer, 64 nodes with RELU activation
+  # Layer added to gradually reduce dimensions before output layer
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+
+denseModel2 %<>% compileModel() 
+
+  
+denseFit2 <- fitModel(denseModel2)
+
+print(denseFit2)
+plot(denseFit2)+labs(title = "Dense Model (2 Hidden Layers)")
+
+#! Additionally hidden layer worsened validation results, will stick with one
+```
+
+```{r dense-model-construction-1hlayer-reg}
+denseModel3 <- keras_model_sequential() %>%
+  layer_dense(units = 512, activation = "relu", input_shape = c(784),
+              # Added conservative value regularization
+              kernel_regularizer = regularizer_l1(.0001)) %>%
+  layer_dense(units = 10, activation = "softmax")
+
+denseModel3 %<>% compileModel()
+    
+
+  
+denseFit3 <- fitModel(denseModel3)
+
+print(denseFit3)
+plot(denseFit3)+labs(title = "Dense Model w/ Regularization (1 Hidden Layer)")
+```
+
+### Seems like the original model does the best job.
+
+```{r predictions, eval = F}
+predictions <- data.frame("ImageId" = 1:28000,
+                          "Label" = predict_classes(denseModel, testDat))
+
+write.csv(predictions, "nnPredictions.csv", row.names = F)
+
+```
+

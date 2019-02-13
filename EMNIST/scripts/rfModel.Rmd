@@ -1,0 +1,53 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup}
+require(magrittr)
+# ML training specific packages
+library(caret); library(e1071); library(randomForest); library(foreach); 
+library(import); library(RcppEigen); library(ranger)
+```
+
+```{r read-data}
+# Set random seed (for truly random validation data at each initialization)
+set.seed(Sys.time())
+
+# Read in data
+trainDat <- read.csv("../data/balanced/emnist-balanced-train.csv", header = F)
+
+## Manipulate Data ##
+# Convert labels to seperate vector and strip from training data
+trainLabels <- trainDat[,1]
+
+# Actually labels from data
+trainDat %<>% .[,-1]
+# Normalize data
+trainDat <- trainDat/255
+
+## Construct Validation Data ##
+# Generate 17,000 random indices, denoting 15% of data
+rIndices <- sample(1:nrow(trainDat), size = 17000)
+# Seperate validation data (subset and strip)
+valDat <- trainDat[rIndices,]
+valLabels <- trainLabels[rIndices]
+# Actually strip from training
+trainDat %<>% .[-rIndices,]
+trainLabels %<>% .[-rIndices] %>% factor
+```
+
+```{r train-rf-model}
+# Record start-time (try)
+try(tictoc::tic())
+
+# Setup and start training #
+# Even though there's no explicit validation diagnostics, the same amount of data
+# will be used for the sake of comparability to other models.
+rfModel <- caret::train(x = trainDat,  
+                        y = trainLabels,
+                        method = "ranger")
+
+# Record end-time (try)
+elapsedTime <- try(tictoc::toc())
+```

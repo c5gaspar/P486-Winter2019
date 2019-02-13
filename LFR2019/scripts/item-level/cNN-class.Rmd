@@ -1,0 +1,34 @@
+```{r setup}
+source("utils/dataSplitting.R")
+source("utils/modelFuns.R")
+
+c(trainDat, valDat, testDat, trainLabels, testLabels, valLabels) %<-% dataGen(nom = T)
+
+set.seed(123456789)
+
+trainDat %<>% array_reshape(c(dim(.)[1], 14, 12, 1))
+```
+
+```{r}
+m1 <- keras_model_sequential() %>%
+  layer_conv_2d(input_shape = c(14, 12), filters = 32, kernel_size = c(3,3),
+                activation = "relu", padding = "same") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(.1) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu", padding = "same") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_dropout(.2) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu", padding = "same") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_dropout(.3) %>%
+  layer_global_average_pooling_2d() %>%
+  layer_dense(units = 7, activation = "softmax")
+
+m1 %>% compileModel()
+
+m1Fit <- fitModel(m1, bs = 56, ep = 100)
+  
+
+```

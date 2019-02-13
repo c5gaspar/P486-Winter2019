@@ -1,0 +1,73 @@
+```{r setup}
+source("utils/dataSplitting.R")
+source("utils/modelFuns.R")
+
+c(trainDat, valDat, testDat, trainLabels, testLabels, valLabels) %<-% dataGen(nom = T)
+
+set.seed(123456789)
+```
+
+
+```{r generate-first-snn}
+baseUnits <- 56
+l2reg <- 1e-6
+
+m1 <- keras_model_sequential() %>%
+  layer_dense(units = baseUnits*3, activation = "relu", input_shape = dim(trainDat)[2],
+              kernel_regularizer = regularizer_l2(l2reg)) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(.3) %>%
+  layer_dense(units = baseUnits*2, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(.4) %>%
+  layer_dense(units = baseUnits, activation = "relu") %>%
+  layer_dense(units = 7, activation = "softmax")
+
+m1 %>% compileModel
+
+m1Fit <- fitModel(m1, bs = 72, ep = 100)
+
+m1Fit %>% plot
+```
+
+
+```{r}
+seqList <- seq(4, 247, 16)
+l2reg <- 1e-6
+baseUnits = 56
+
+fitMetrics <- list()
+
+for(i in 1:length(seqList)) {
+
+  bs <- seqList[i]
+
+baseUnits <- 56
+l2reg <- 1e-6
+
+m1 <- keras_model_sequential() %>%
+  layer_dense(units = baseUnits*3, activation = "relu", input_shape = dim(trainDat)[2],
+              kernel_regularizer = regularizer_l2(l2reg)) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(.05) %>%
+  layer_dense(units = baseUnits*2, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(.025) %>%
+  layer_dense(units = baseUnits, activation = "relu") %>%
+  layer_dense(units = 7, activation = "softmax")
+
+m1 %>% compileModel
+
+m1Fit <- fitModel(m1, bs = seqList[i], ep = 40)
+
+fitMetrics[[i]] <- mutate(plot(m1Fit)$data, "BatchSize" = seqList[i])
+}
+
+plyr::rbind.fill(fitMetrics) %>%
+  filter(metric %in% "acc") %>%
+  ggplot(aes(x = epoch, y = value, group = data, colour = data))+
+  geom_point()+
+  geom_smooth()+
+  facet_wrap(~`BatchSize`)
+
+```

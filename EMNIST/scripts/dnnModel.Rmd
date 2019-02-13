@@ -1,0 +1,44 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r load-data}
+require(dplyr)
+# Load training & validation data
+source("utils/processTrainData.R")
+# Load compiling function
+source("utils/modelFuns.R")
+
+set.seed(90812409)
+```
+
+```{r train}
+nodeIter <- (function(){
+  nodeSeq <- seq(1024, 10240, 1024)
+  fitMetrics <- list()
+  for(node in 1:length(nodeSeq)) {
+    dModel <- keras_model_sequential() %>%
+      layer_dense(units = nodeSeq[node], input_shape = c(784), activation = "relu") %>%
+      layer_dense(units = 47, activation = "softmax")
+    
+    dModel %>% compileModel()
+    
+    dModelFit <- fitModel(dModel, bs = 1024, ep = 30, v = 1)
+    
+    fitMetrics[[node]] <- mutate(plot(dModelFit)$data, "node_size" = nodeSeq[node])
+    print(dModelFit)
+  }
+  return(fitMetrics) 
+})()
+
+
+dModel <- keras_model_sequential() %>%
+  layer_dense(units = 2048, input_shape = c(784), activation = "relu") %>%
+  layer_dense(units = 47, activation = "softmax")
+
+dModel %>% compileModel()
+
+dModelFit <- fitModel(dModel, bs = 1024, ep = 1, v = 1)
+
+```

@@ -1,0 +1,86 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup}
+source("utils/dataSplitting.R")
+source("utils/modelFuns.R")
+
+c(trainDat, testDat, trainLabels, testLabels) %<-% dataGen(nom = F, validation = F, mat = T)
+
+set.seed(123456789)
+```
+
+```{r model-1}
+m1 <- keras_model_sequential() %>%
+  layer_dense(units = 32, activation = "relu", input_shape = dim(trainDat)[2],
+              kernel_regularizer = regularizer_l2(1e-6)) %>%
+  layer_dense(units = 16, activation = "relu",
+              kernel_regularizer = regularizer_l2(1e-6)) %>%
+  layer_dense(units = 1)
+
+m1 %>% compile(optimizer = optimizer_rmsprop(),
+               loss = "mean_squared_error",
+               metric = "mean_absolute_error")
+
+m1_history <- fit(object = m1, 
+                  x = trainDat,
+                  y = trainLabels,
+                  validation_split = .2,
+                  batch_size = 96, 
+                  epoch = 500, 
+                  callbacks = list(print_dot_callback, 
+                                   callback_early_stopping(monitor = "val_loss", 
+                                                           patience = 20)),
+                  verbose = 0)
+
+m1_history %>% plot
+
+m1_history
+
+#r3 <- m1 %>% evaluate(testDat, testLabels)
+```
+
+```{r model-2}
+m2 <- keras_model_sequential() %>%
+  layer_dense(units = 128, input_shape = dim(trainDat)[2], activation = "relu",
+              kernel_regularizer = regularizer_l2(1e-6)) %>%
+  layer_dense(units = 64, activation = "relu", kernel_regularizer = regularizer_l2(1e-6)) %>%
+  layer_dense(units = 1)
+
+
+m2 %>% compile(optimizer = optimizer_rmsprop(),
+               loss = "mean_squared_error",
+               metric = "mean_absolute_error")
+
+m2_history <- 
+  fit(m2, 
+                  x = trainDat,
+                  y = trainLabels,
+                  validation_split = .2,
+                  batch_size = 64,
+                  epoch = 150,
+                  verbose = 0,
+                  callbacks = list(print_dot_callback, 
+                                   callback_early_stopping(monitor = "val_loss",
+                                                           patience = 10)))
+
+m2_history
+
+m2_history %>% plot
+
+m2 %>% evaluate(testDat, testLabels)
+
+```
+
+
+
+```{r predictions}
+pred <- round(predict(m1, testDat))
+pred[pred>6] <- 6
+pred[pred<0] <- 0
+
+caret::confusionMatrix(as.factor(pred), as.factor(testLabels))
+```
+

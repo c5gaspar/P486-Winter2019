@@ -1,0 +1,37 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup}
+invisible(library(glmnet))
+source("utils/modelFuns.R")
+invisible(source("utils/dataSplitting.R"))
+
+c(trainDat, testDat, trainLabels, testLabels, valDat, valLabels) %<-% dataGen(nom = F, validation = T, mat = F)
+```
+
+```{r data-setup}
+outcome <- trainLabels
+features <- model.matrix(trainLabels ~ ., data = cbind(trainDat, trainLabels))
+```
+
+```{r lasso-model}
+# Find most generalizble lambda value
+lassoModel.cv <- cv.glmnet(x = features, 
+                        y = outcome,
+                        alpha = 1,
+                        nfolds = 13)
+
+# Construct basic model
+lassoModel <- glmnet(x = features,
+                     y = outcome,
+                     alpha = 1, 
+                     lambda = lassoModel.cv$lambda.min)
+
+```
+
+```{r model-predictions}
+predict.glmnet(object = lassoModel, newx = valDat, type = "response")
+```
+

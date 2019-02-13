@@ -1,0 +1,328 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+## MNIST <u>Convoluted</u> Neural Network Model Generation
+# Last updated (executed): `r format(Sys.Date(), "%a %b %d, %Y")`
+
+```{r setup}
+# Load packages
+library(knitr)
+library(tidyverse); library(magrittr); library(keras); library(ggplot2)
+
+knitr::opts_chunk$set(cache = TRUE)
+# Set random seed (maybe important given stochastic gradient descent?)
+set.seed(Sys.time())  # truly random for validation data extraction
+```
+
+```{r input-and-manipulate-data}
+# Data in this format was received from Kaggle MNIST kernel
+# https://www.kaggle.com/c/digit-recognizer
+
+### INPUT DATA ###
+# Load training data
+trainDatRaw <- read.csv("train.csv") %>%
+  data.matrix()  # This makes reshaping/processing the data a lot easier
+
+# Load testing data
+testDatRaw <- read.csv("test.csv") %>%
+  data.matrix()  # This makes reshaping/processing the data a lot easier
+
+
+### MANIPULATE DATA ###
+# Store training labels
+trainLabels <- trainDatRaw[,1] %>%
+  to_categorical()  # Creating vector of integers denoting which label is present
+# Strip labels from training data
+trainDat <- trainDatRaw %>% 
+  .[,-1] %>%
+  # Bring values between 0 and 1 (alternatively can divide by 255)
+  normalize()
+
+# Grab some validation data
+valInd <- sample(1:dim(trainDat)[1], 5000)  # Generate random indices
+valDat <- trainDat[valInd,]  # Create validation data through indices
+valLabels <- trainLabels[valInd,]  # Create validation labels
+trainDat %<>% .[-valInd,]  # Remove features from training data
+trainLabels %<>% .[-valInd,]  # Remove labels from training labels
+
+# Normalize test data
+testDat <- normalize(testDatRaw)
+
+# Reshape data (add depth dimension) for conv modeling
+trainDat %<>% array_reshape(c(37000, 28, 28, 1))
+testDat %<>% array_reshape(c(28000, 28, 28, 1))
+valDat %<>% array_reshape(c(5000, 28, 28, 1))
+
+### Setup compile function ###
+compileModel <- function(x) {
+  compile(object = x,
+          # Sets the parameters for gradient descent
+          optimizer = "rmsprop",
+          # Compares the observed prob. distribution to the predicted prob. distribution of labels
+          loss = "categorical_crossentropy",
+          # Indicates the metric of interest in training (what to minimize)
+          metrics = c("accuracy"))
+}
+
+### Setup fit function ###
+fitModel <- function(x, bs = 256, ep = 20, v = 2) {
+  fit(object = x,  # Feeding the model structure
+      x = trainDat,  # Training data (features)
+      y = trainLabels,   # Training labels (targets)
+      batch_size = bs,  # Sample size (# of images) for each descent 
+      epochs = ep,   # Total number of full samples to use in training
+      validation_data = list(valDat, valLabels),  # Validation data
+      verbose = v)  # Silent
+}
+```
+
+```{r build-convnet}
+
+##### FIRST NETWORK #####
+
+### Build network
+
+convModel1 <- keras_model_sequential() %>%
+  # First conv layer. Reduces image to 26x26
+  layer_conv_2d(filters = 32,  # The 'depth' of the kernel outputs
+                kernel_size = c(3,3),  # The size (dims) of each spotlight 
+                activation = "relu",
+                input_shape = c(28, 28, 1)) %>% 
+  # First max pooling layer, takes the max value for a 2x2 area and creates new map
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Second conv layer, reduces image from 13x13 (after pool) to 11x11. 
+  layer_conv_2d(filters = 64,  # Increased depth for each kernel (now producing more maps)
+                kernel_size = c(3,3),
+                activation = "relu") %>%
+  # Second pooling
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Final conv layer, takes 5x5 and turns into 3x3
+  layer_conv_2d(filters = 64, 
+                kernel_size = c(3, 3), 
+                activation = "relu") %>%
+  # Finally, prepare for output layer by flattening 3D into 1D
+  layer_flatten() %>%
+  # Add fully connected layer after flattening, which will then connect to output
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+
+### Compile 
+convModel1 %>% compileModel()
+
+### Train
+convModelFit1 <- fitModel(convModel1, bs = 572, ep = 20, v = 1)
+```
+
+
+```{r build-convnet-iter, fig.width = 8.5, fig.height = 10.5, dpi = 1200}
+#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#
+##### Run through different batch sizes #####
+#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#
+
+convModelFitIter <- (function() {
+batchSizes = seq(64, 1024, 64)
+modelList <- list()
+for(i in 1:length(batchSizes)) {
+  convModel1 <- keras_model_sequential() %>%
+  # First conv layer. Reduces image to 26x26
+  layer_conv_2d(filters = 32,  # The 'depth' of the kernel outputs
+                kernel_size = c(3,3),  # The size (dims) of each spotlight 
+                activation = "relu",
+                input_shape = c(28, 28, 1)) %>% 
+  # First max pooling layer, takes the max value for a 2x2 area and creates new map
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Second conv layer, reduces image from 13x13 (after pool) to 11x11. 
+  layer_conv_2d(filters = 64,  # Increased depth for each kernel (now producing more maps)
+                kernel_size = c(3,3),
+                activation = "relu") %>%
+  # Second pooling
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Final conv layer, takes 5x5 and turns into 3x3
+  layer_conv_2d(filters = 64, 
+                kernel_size = c(3, 3), 
+                activation = "relu") %>%
+  # Finally, prepare for output layer by flattening 3D into 1D
+  layer_flatten() %>%
+  # Add fully connected layer after flattening, which will then connect to output
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+
+### Compile 
+convModel1 %>% compileModel()
+
+### Fit
+convModelFitIter <- fitModel(convModel1, bs = batchSizes[i], ep = 100, v = 1)
+
+modelList[[i]] <- mutate(plot(convModelFitIter)$data, "batch_size" = batchSizes[i])
+print(convModelFitIter)
+}
+return(modelList)
+})()
+
+# Combine list into one data.frame
+convModelFitIter.C <- plyr::rbind.fill(convModelFitIter)
+
+batchEpochData <- filter(convModelFitIter.C, epoch %in% seq(10, 100, 10), 
+       (metric %in% "acc" & data %in% "training") | 
+       (metric %in% "loss" & data %in% "validation")) %>%
+  # Combine for labels
+  mutate("group" = paste(data, metric),
+         "epoch" = paste(epoch, "Epochs"),
+         "epoch" = factor(epoch, levels = levels(factor(epoch))[c(1, 3:10, 2)]))
+
+ggplot(batchEpochData, aes(x = batch_size, y = value, colour = group))+
+  geom_point()+
+  geom_smooth()+
+  coord_trans(y = "log10")+
+  scale_y_continuous(breaks = c(0, .01, .05, .1, .3, .75, 1))+
+  scale_x_continuous("Training Batch Size", breaks = seq(0, 1024, 128))+
+  facet_wrap(~epoch, ncol = 3)
+```
+
+```{r research-conv-net}
+# Research validation loss
+filter(batchEpochData, group %in% "validation loss") %>%
+  arrange(value)
+
+# Data creation
+valLossData <- filter(convModelFitIter.C, 
+                      (metric %in% "loss" & data %in% "validation"))
+
+# Linear model
+valLossData %>%
+  lm(value ~ epoch + batch_size + epoch*batch_size, data = .) %>% 
+  summary
+
+# Scatterplot
+ggplot(valLossData, aes(x = epoch, y = value, colour = batch_size, group = batch_size))+
+  coord_cartesian(ylim = c(0, .25))+
+  geom_point()+
+  scale_y_continuous("Validation Loss")+
+  geom_smooth()
+
+filter(valLossData, batch_size %in% seq(64, 256, 64)) %>%
+  ggplot(aes(x = epoch, y = value, colour = batch_size, group = batch_size))+
+  coord_cartesian(ylim = c(0, .25))+
+  geom_point()+
+  scale_y_continuous("Validation Loss")+
+  geom_smooth()+
+  facet_wrap(~batch_size)
+```
+
+
+```{r rebuild-convnet}
+convModel2 <- keras_model_sequential() %>%
+  # First conv layer. Reduces image to 26x26
+  layer_conv_2d(filters = 32,  # The 'depth' of the kernel outputs
+                kernel_size = c(3,3),  # The size (dims) of each spotlight 
+                activation = "relu",
+                input_shape = c(28, 28, 1)) %>% 
+  # First max pooling layer, takes the max value for a 2x2 area and creates new map
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Second conv layer, reduces image from 13x13 (after pool) to 11x11. 
+  layer_conv_2d(filters = 64,  # Increased depth for each kernel (now producing more maps)
+                kernel_size = c(3,3),
+                activation = "relu") %>%
+  # Second pooling
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Final conv layer, takes 5x5 and turns into 3x3
+  layer_conv_2d(filters = 64, 
+                kernel_size = c(3, 3), 
+                activation = "relu") %>%
+  # Finally, prepare for output layer by flattening 3D into 1D
+  layer_flatten() %>%
+  # Add fully connected layer after flattening, which will then connect to output
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+
+### Compile 
+convModel2 %>% compileModel()
+
+### Fit
+convModelFitIter <- fitModel(convModel2, bs = 64, ep = 10, v = 1)
+
+data.frame("ImageId" = 1:28000,
+           "Label" = predict_classes(convModel2, testDat)) %>%
+  write.csv("prediction-files/convnet/cNNprediction_bs64e10.csv", row.names = F)
+
+# 98.7% acc
+```
+
+
+```{r rebuild-model-2}
+convModel3 <- keras_model_sequential() %>%
+  # First conv layer. Reduces image to 26x26
+  layer_conv_2d(filters = 32,  # The 'depth' of the kernel outputs
+                kernel_size = c(3,3),  # The size (dims) of each spotlight 
+                activation = "relu",
+                input_shape = c(28, 28, 1)) %>% 
+  # First max pooling layer, takes the max value for a 2x2 area and creates new map
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Second conv layer, reduces image from 13x13 (after pool) to 11x11. 
+  layer_conv_2d(filters = 64,  # Increased depth for each kernel (now producing more maps)
+                kernel_size = c(3,3),
+                activation = "relu") %>%
+  # Second pooling
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Final conv layer, takes 5x5 and turns into 3x3
+  layer_conv_2d(filters = 64, 
+                kernel_size = c(3, 3), 
+                activation = "relu") %>%
+  # Finally, prepare for output layer by flattening 3D into 1D
+  layer_flatten() %>%
+  # Add fully connected layer after flattening, which will then connect to output
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+
+### Compile 
+convModel3 %>% compileModel()
+
+### Fit
+convModelFitIter <- fitModel(convModel3, bs = 384, ep = 20, v = 1)
+
+data.frame("ImageId" = 1:28000,
+           "Label" = predict_classes(convModel3, testDat)) %>%
+  write.csv("prediction-files/convnet/cNNprediction_bs384e20.csv", row.names = F)
+
+# 98.4% acc, so original conclusions were likely true.
+```
+
+
+```{r build-model-sanity-check}
+convModel4 <- keras_model_sequential() %>%
+  # First conv layer. Reduces image to 26x26
+  layer_conv_2d(filters = 32,  # The 'depth' of the kernel outputs
+                kernel_size = c(3,3),  # The size (dims) of each spotlight 
+                activation = "relu",
+                input_shape = c(28, 28, 1)) %>% 
+  # First max pooling layer, takes the max value for a 2x2 area and creates new map
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Second conv layer, reduces image from 13x13 (after pool) to 11x11. 
+  layer_conv_2d(filters = 64,  # Increased depth for each kernel (now producing more maps)
+                kernel_size = c(3,3),
+                activation = "relu") %>%
+  # Second pooling
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Final conv layer, takes 5x5 and turns into 3x3
+  layer_conv_2d(filters = 64, 
+                kernel_size = c(3, 3), 
+                activation = "relu") %>%
+  # Finally, prepare for output layer by flattening 3D into 1D
+  layer_flatten() %>%
+  # Add fully connected layer after flattening, which will then connect to output
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+
+### Compile 
+convModel4 %>% compileModel()
+
+### Fit
+convModelFitIter <- fitModel(convModel4, bs = 1024, ep = 100, v = 1)
+
+data.frame("ImageId" = 1:28000,
+           "Label" = predict_classes(convModel4, testDat)) %>%
+  write.csv("prediction-files/convnet/cNNprediction_bs1024e100.csv", row.names = F)
+
+```
